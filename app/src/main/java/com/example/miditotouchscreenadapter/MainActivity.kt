@@ -1,10 +1,14 @@
 package com.example.miditotouchscreenadapter
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.media.midi.MidiDevice
 import android.media.midi.MidiDeviceInfo
 import android.media.midi.MidiInputPort
 import android.media.midi.MidiManager
 import android.media.midi.MidiReceiver
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Bundle
@@ -23,49 +27,61 @@ import androidx.compose.ui.tooling.preview.Preview
 import com.example.miditotouchscreenadapter.ui.theme.MidiToTouchscreenAdapterTheme
 import java.util.concurrent.Executors
 
+// First Do -> 24
+// Last Do -> 96
+
 class MainActivity : ComponentActivity() {
 
-    //private lateinit var deviceCallback: MidiManager.DeviceCallback
+    private lateinit var deviceCallback: MidiManager.DeviceCallback
     private val openDevices = mutableSetOf<Int>() // Keep track of already opened deviceIds
     private lateinit var midiManager: MidiManager
     private val handler = Handler(Looper.getMainLooper())
+    private lateinit var currentNote: MutableState<String>
+    private val CHANNEL_ID = "midi_device_channel"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         Log.i("MIDI","APP STARTING");
         super.onCreate(savedInstanceState)
 
-        midiManager = getSystemService(MidiManager::class.java)
+        createNotificationChannel()
 
+        midiManager = getSystemService(MidiManager::class.java)
+        //midiManager = getSystemService(MIDI_SERVICE) as MidiManager
+
+        // Define the callback
+        deviceCallback = object : MidiManager.DeviceCallback() {
+            override fun onDeviceAdded(info: MidiDeviceInfo) {
+                Log.i("MIDI", "Device added: ${info.properties}")
+                openMidiDevice(info) { note, velocity ->
+                    // UI updated through Compose state
+                    currentNote.value = "Note: $note velocity=$velocity"
+                }
+            }
+
+            override fun onDeviceRemoved(info: MidiDeviceInfo) {
+                Log.i("MIDI", "Device removed: ${info.properties}")
+                // Optional: remove from openDevices
+                openDevices.remove(info.id)
+            }
+        }
+
+        // Register the callback
+        midiManager.registerDeviceCallback(deviceCallback, handler)
+
+        // Compose UI state
+        currentNote = mutableStateOf("Waiting for MIDI input...")
+
+        // Open any already-connected devices
+        for (device in midiManager.devices) {
+            openMidiDevice(device) { note, velocity ->
+                currentNote.value = "Note: $note velocity=$velocity"
+            }
+        }
+
+        // Compose UI
         setContent {
             MidiToTouchscreenAdapterTheme {
-                var noteText by remember { mutableStateOf("Waiting for MIDI input...") }
-
-                Text(text = noteText, modifier = Modifier)
-
-                LaunchedEffect(Unit) {   // runs only once when the Composable enters composition
-                    val handler = Handler(Looper.getMainLooper())
-
-                    // Register MIDI device callback once
-                    midiManager.registerDeviceCallback(object : MidiManager.DeviceCallback() {
-                        override fun onDeviceAdded(info: MidiDeviceInfo) {
-                            openMidiDevice(info) { note, velocity ->
-                                noteText = "Note: $note velocity=$velocity"
-                            }
-                        }
-                        override fun onDeviceRemoved(info: MidiDeviceInfo) {
-                            Log.i("MIDI", "Device removed: ${info.properties}")
-                            // Optional: remove from openDevices
-                            openDevices.remove(info.id)
-                        }
-                    }, handler)
-
-                    // Open already-connected devices once
-                    for (device in midiManager.devices) {
-                        openMidiDevice(device) { note, velocity ->
-                            noteText = "Note: $note velocity=$velocity"
-                        }
-                    }
-                }
+                Text(text = currentNote.value, modifier = Modifier.fillMaxSize())
             }
         }
     }
@@ -124,6 +140,35 @@ class MainActivity : ComponentActivity() {
         }
 
         outputPort.connect(receiver)
+        sendDeviceConnectedNotification(device.info.properties[MidiDeviceInfo.PROPERTY_NAME] as String)
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return
+        }
+
+        val name = "MIDI Devices"
+        val descriptionText = "Notifications when a MIDI device is connected"
+        val importance = NotificationManager.IMPORTANCE_DEFAULT
+        val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
+            description = descriptionText
+        }
+        val notificationManager: NotificationManager =
+            getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.createNotificationChannel(channel)
+    }
+
+    private fun sendDeviceConnectedNotification(name: String) {
+        val notification = Notification.Builder(this, CHANNEL_ID)
+            .setContentTitle("MIDI Device Connected")
+            .setContentText("MIDI device connected: $name")
+            .setSmallIcon(android.R.drawable.ic_media_play) // use any icon you like
+            .setAutoCancel(true)
+            .build()
+
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(0, notification) // unique ID per device
     }
 }
 

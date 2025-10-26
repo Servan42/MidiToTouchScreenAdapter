@@ -3,6 +3,7 @@ package com.example.miditotouchscreenadapter
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.res.Resources
 import android.media.midi.MidiDevice
 import android.media.midi.MidiDeviceInfo
 import android.media.midi.MidiInputPort
@@ -27,9 +28,6 @@ import androidx.compose.ui.tooling.preview.Preview
 import com.example.miditotouchscreenadapter.ui.theme.MidiToTouchscreenAdapterTheme
 import java.util.concurrent.Executors
 
-// First Do -> 24
-// Last Do -> 96
-
 class MainActivity : ComponentActivity() {
 
     private lateinit var deviceCallback: MidiManager.DeviceCallback
@@ -38,6 +36,8 @@ class MainActivity : ComponentActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var currentNote: MutableState<String>
     private val CHANNEL_ID = "midi_device_channel"
+    private val displayMetrics = Resources.getSystem().displayMetrics
+    private val mapper = MidiToLocationMapper()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         Log.i("MIDI","APP STARTING");
@@ -55,6 +55,8 @@ class MainActivity : ComponentActivity() {
                 openMidiDevice(info) { note, velocity ->
                     // UI updated through Compose state
                     currentNote.value = "Note: $note velocity=$velocity"
+                    val location = mapper.mapNoteToLocation(note)
+                    MidiTouchAccessibilityService.instance?.simulateTap(location.x, location.y)
                 }
             }
 
@@ -75,6 +77,8 @@ class MainActivity : ComponentActivity() {
         for (device in midiManager.devices) {
             openMidiDevice(device) { note, velocity ->
                 currentNote.value = "Note: $note velocity=$velocity"
+                val location = mapper.mapNoteToLocation(note)
+                MidiTouchAccessibilityService.instance?.simulateTap(location.x, location.y)
             }
         }
 
@@ -133,7 +137,7 @@ class MainActivity : ComponentActivity() {
                     }
                     status and 0xF0 == 0x80 || (status and 0xF0 == 0x90 && velocity == 0) -> {
                         Log.i("MIDI", "Note OFF: $note velocity=$velocity")
-                        onNote(note, 0)
+                        //onNote(note, 0)
                     }
                 }
             }
@@ -169,21 +173,5 @@ class MainActivity : ComponentActivity() {
 
         val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(0, notification) // unique ID per device
-    }
-}
-
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
-}
-
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    MidiToTouchscreenAdapterTheme {
-        Greeting("Android")
     }
 }
